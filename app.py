@@ -1,27 +1,54 @@
 from flask import Flask, request, jsonify
-import requests, json
+import requests
 
 app = Flask(__name__)
 
-TOKEN = "ACCESS_TOKEN_BTATAK"
+WHATSAPP_TOKEN = "ACCESS_TOKEN_BTATAK"
 PHONE_ID = "993956793812385"
 VERIFY_TOKEN = "mybot123"
+GEMINI_KEY = "YOUR_NEW_GEMINI_KEY"
 
-with open("qa.json", "r", encoding="utf-8") as f:
-    QA = json.load(f)
+SYSTEM_PROMPT = """أنت مساعد خدمة عملاء لمتجر VOX ME للجيمينج.
 
-def find_answer(user_msg):
-    user_msg = user_msg.lower().strip()
-    for item in QA:
-        for keyword in item["keywords"]:
-            if keyword in user_msg:
-                return item["answer"]
-    return "شكراً لتواصلك! هرد عليك في أقرب وقت 🙏"
+معلومات المتجر:
+- الموقع: https://voxmeshop.com
+- واتساب: 01080046642
+- المنتجات: كيبوردات ميكانيكية، ماوسات جيمينج، هيدسيتس، ماوس باد
+
+الدفع: كاش عند الاستلام أو تحويل واتساب. قريباً: InstaPay وفودافون كاش
+الشحن: 70-100 جنيه، 5-7 أيام، أيام الأحد والاثنين والأربعاء والخميس
+الاستبدال: خلال 7 أيام، المنتج جديد لم يستخدم، مع الصندوق والملحقات
+الإرجاع: غير متوفر
+الضمان: 6 أشهر لسنة حسب المنتج
+
+قواعد الرد:
+- ردود قصيرة ومفيدة
+- ابدأ بمرحبا أو السلام عليكم
+- استخدم إيموجي باعتدال
+- المشاكل التقنية والأسئلة الصعبة: حول لـ 01080046642
+- لو مش عارف الإجابة: قول تواصل معنا على 01080046642"""
+
+def ask_gemini(user_message):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": SYSTEM_PROMPT + "\n\nالعميل: " + user_message}
+                ]
+            }
+        ],
+        "generationConfig": {"maxOutputTokens": 300}
+    }
+    response = requests.post(url, headers=headers, json=data)
+    result = response.json()
+    return result["candidates"][0]["content"]["parts"][0]["text"]
 
 def send_whatsapp(to, message):
     url = f"https://graph.facebook.com/v18.0/{PHONE_ID}/messages"
     headers = {
-        "Authorization": f"Bearer {TOKEN}",
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json"
     }
     data = {
@@ -43,12 +70,14 @@ def webhook():
     data = request.json
     try:
         msg = data["entry"][0]["changes"][0]["value"]["messages"][0]
+        if msg["type"] != "text":
+            return jsonify({"status": "ok"})
         from_number = msg["from"]
         text = msg["text"]["body"]
-        answer = find_answer(text)
-        send_whatsapp(from_number, answer)
-    except:
-        pass
+        reply = ask_gemini(text)
+        send_whatsapp(from_number, reply)
+    except Exception as e:
+        print(f"Error: {e}")
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
